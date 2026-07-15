@@ -24,6 +24,7 @@ fail() {
 
 export HOME="$tmp_dir/home"
 export XDG_CACHE_HOME="$tmp_dir/cache"
+export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_STATE_HOME="$tmp_dir/state"
 export TMUX_WORKTREE_ROOTS="$tmp_dir/repos"
 export TMUX_WORKTREE_DIR="$tmp_dir/worktrees"
@@ -32,9 +33,18 @@ export TMUX_CALL_LOG="$tmp_dir/tmux-calls"
 export FNM_CALL_LOG="$tmp_dir/fnm-calls"
 export REAL_TMUX=$real_tmux
 export PATH="$repo_dir/tests/bin:$PATH"
-mkdir -p "$HOME" "$TMUX_WORKTREE_ROOTS"
+export SHELL
+SHELL=$(command -v fish)
+mkdir -p "$HOME/.config/fish" "$TMUX_WORKTREE_ROOTS"
 : >"$TMUX_CALL_LOG"
 : >"$FNM_CALL_LOG"
+
+printf '%s\n' \
+  'set -gx TEST_NODE_VERSION default' \
+  'function fnm' \
+  '  set -gx TEST_NODE_VERSION project' \
+  '  printf "use\\n" >> "$FNM_CALL_LOG"' \
+  'end' >"$HOME/.config/fish/config.fish"
 
 regular="$TMUX_WORKTREE_ROOTS/regular project"
 mkdir -p "$regular/apps/api"
@@ -101,6 +111,14 @@ for _ in 1 2 3 4 5; do
 done
 [[ $(wc -l <"$FNM_CALL_LOG") == 3 ]] || fail 'fnm setup did not run in every pane'
 grep -q 'TMUX_WORKTREE_PANE_COMMAND=:' "$TMUX_CALL_LOG" || fail 'editor command not passed to pane runner'
+
+right_pane=$(tmux list-panes -t '=regular-project-feature-test:edit' -F '#{pane_id}' | sed -n '2p')
+tmux send-keys -t "$right_pane" "printf '%s' \"\$TEST_NODE_VERSION\" > '$tmp_dir/node-version'" C-m
+for _ in 1 2 3 4 5; do
+  [[ -f $tmp_dir/node-version ]] && break
+  sleep 0.1
+done
+[[ $(<"$tmp_dir/node-version") == project ]] || fail 'fnm environment did not persist in interactive shell'
 
 # fzf exits 1 when a new query matches no existing branch. The query must still
 # proceed to worktree creation instead of being mistaken for cancellation.

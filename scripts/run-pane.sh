@@ -16,13 +16,17 @@ if [[ -f package.json || -f .node-version || -f .nvmrc ]]; then
 fi
 
 if [[ -n $setup && -n $command ]]; then
-  startup="$setup; $command; exec \"$shell\" -i"
+  startup="$setup; $command"
 elif [[ -n $setup ]]; then
-  startup="$setup; exec \"$shell\" -i"
+  startup=$setup
 elif [[ -n $command ]]; then
-  startup="$command; exec \"$shell\" -i"
+  startup=$command
 else
   exec "$shell" -i
 fi
 
-exec "$shell" -lc "$startup"
+if [[ $shell_name == fish ]]; then
+  exec "$shell" -i -C "$startup"
+fi
+
+exec "$shell" -lc "$startup; exec \"$shell\" -i"
