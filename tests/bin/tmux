@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+set -eu
+
+if [[ -n ${TMUX_CALL_LOG:-} ]]; then
+  printf '%q ' "$@" >>"$TMUX_CALL_LOG"
+  printf '\n' >>"$TMUX_CALL_LOG"
+fi
+
+exec "$REAL_TMUX" -L "$TMUX_TEST_SOCKET" "$@"

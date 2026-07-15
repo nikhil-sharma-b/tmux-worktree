@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+plugin_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../scripts/lib.sh
+source "$plugin_dir/scripts/lib.sh"
+
+require_command git
+
+fzf_common=(
+  --height=100%
+  --ansi
+  --no-multi
+  --layout=reverse
+  --border=none
+  --no-scrollbar
+  --separator=' '
+  --pointer='▌'
+  --marker=' '
+  --color='fg:-1,bg:-1,hl:4,fg+:-1:regular,bg+:-1,hl+:12,info:8,prompt:8,pointer:4,marker:4,spinner:8,header:8,border:8,gutter:-1'
+  --info=hidden
+  --prompt='  '
+  --header-first
+  --padding='1,2'
+)
+
+pick_repo() {
+  require_command fzf
+  "$plugin_dir/scripts/discover.sh" list | fzf "${fzf_common[@]}" \
+    --delimiter=$'\t' \
+    --with-nth='2..' \
+    --expect=ctrl-b \
+    --header='↵ select · ^b choose base · ^r refresh repos · esc' \
+    --preview="'$plugin_dir/scripts/preview-repo.sh' {1}" \
+    --preview-window='right,55%,border-left' \
+    --bind="ctrl-r:reload('$plugin_dir/scripts/discover.sh' refresh)" \
+    | cut -f1
+}
+
+branch_list() {
+  local repo=$1
+  git -C "$repo" for-each-ref --sort=-committerdate --format='%(refname)' refs/heads refs/remotes \
+    | sed -e '/\/HEAD$/d' -e 's|^refs/heads/||' -e 's|^refs/remotes/[^/]*/||' \
+    | awk '!seen[$0]++'
+}
+
+pick_base() {
+  local repo=$1 output key branch
+  require_command fzf
+  output=$(branch_list "$repo" | fzf "${fzf_common[@]}" \
+    --expect=ctrl-d \
+    --header='↵ use once · ^d save default · esc' \
+    --preview="'$plugin_dir/scripts/preview-branch.sh' '$repo' {}" \
+    --preview-window='right,55%,border-left') || return 1
+  key=$(printf '%s\n' "$output" | sed -n '1p')
+  branch=$(printf '%s\n' "$output" | sed -n '2p')
+  [[ -n $branch ]] || return 1
+  if [[ $key == ctrl-d ]]; then
+    "$plugin_dir/scripts/state.sh" set "$repo" "$branch"
+  fi
+  printf '%s\n' "$branch"
+}
+
+pick_target() {
+  local repo=$1 output query selection
+  require_command fzf
+  output=$(branch_list "$repo" | fzf "${fzf_common[@]}" \
+    --print-query \
+    --header='Type new branch · ↵ create or reopen · esc') || return 1
+  query=$(printf '%s\n' "$output" | sed -n '1p')
+  selection=$(printf '%s\n' "$output" | sed -n '2p')
+  printf '%s\n' "${query:-$selection}"
+}
+
+resolve_repo() {
+  local requested=$1 path label
+  if [[ -e $requested ]] && repo_common_dir "$requested" >/dev/null; then
+    printf '%s\n' "$requested"
+    return 0
+  fi
+  while IFS=$'\t' read -r path label; do
+    if [[ $(repo_name "$path") == "$requested" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done < <("$plugin_dir/scripts/discover.sh" list)
+  return 1
+}
+
+switch_to_session() {
+  local session=$1
+  if [[ -n ${TMUX:-} ]]; then
+    tmux switch-client -t "=$session"
+  else
+    tmux attach-session -t "=$session"
+  fi
+}
+
+create_worktree() {
+  local repo=$1 base=$2 target=$3 editor=$4 right=$5 shell=$6 no_switch=$7
+  local worktree_root name safe_target worktree session existing base_ref
+
+  git check-ref-format --branch "$target" >/dev/null 2>&1 || die "invalid branch name: $target"
+  worktree_root=$(worktrees_dir)
+  name=$(repo_name "$repo")
+  safe_target=$(safe_name "$target")
+  [[ -n $safe_target ]] || die "branch produces empty session name: $target"
+  worktree="$worktree_root/$name/$safe_target"
+  session="$(safe_name "$name")-$safe_target"
+
+  if tmux has-session -t "=$session" 2>/dev/null; then
+    [[ $no_switch == 1 ]] || switch_to_session "$session"
+    return 0
+  fi
+
+  existing=$(git -C "$repo" worktree list --porcelain | awk -v ref="refs/heads/$target" '
+    /^worktree / { path=substr($0, 10) }
+    $0 == "branch " ref { print path; exit }
+  ')
+  if [[ -n $existing && -d $existing ]]; then
+    worktree=$existing
+  elif [[ -d $worktree ]]; then
+    die "destination exists but is not target worktree: $worktree"
+  else
+    mkdir -p "${worktree%/*}"
+    if git -C "$repo" show-ref --verify --quiet "refs/heads/$target"; then
+      git -C "$repo" worktree add "$worktree" "$target"
+    else
+      if git -C "$repo" rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+        base_ref=$base
+      elif git -C "$repo" rev-parse --verify --quiet "origin/$base^{commit}" >/dev/null; then
+        base_ref="origin/$base"
+      else
+        die "base branch not found: $base"
+      fi
+      git -C "$repo" worktree add -b "$target" "$worktree" "$base_ref"
+    fi
+  fi
+
+  "$plugin_dir/scripts/link-envs.sh" "$repo" "$worktree"
+  "$plugin_dir/scripts/create-session.sh" "$session" "$worktree" "$editor" "$right" "$shell" >/dev/null
+  [[ $no_switch == 1 ]] || switch_to_session "$session"
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  tmux-worktree pick
+  tmux-worktree refresh
+  tmux-worktree create [options]
+
+Options:
+  --repo PATH|NAME
+  --base REF
+  --branch NAME
+  --choose-base
+  --editor-command COMMAND
+  --right-command COMMAND
+  --shell-command COMMAND
+  --no-switch
+EOF
+}
+
+action=${1:-pick}
+[[ $# -gt 0 ]] && shift
+
+case $action in
+  refresh)
+    "$plugin_dir/scripts/discover.sh" refresh
+    exit
+    ;;
+  pick|create) ;;
+  -h|--help|help) usage; exit ;;
+  *) die "unknown action: $action" ;;
+esac
+
+repo=''
+base=''
+target=''
+choose_base=0
+editor=$(tmux_worktree_option '@worktree-editor-command' 'nvim .')
+right=''
+shell=''
+no_switch=0
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --repo) repo=${2:?missing value for --repo}; shift 2 ;;
+    --base) base=${2:?missing value for --base}; shift 2 ;;
+    --branch) target=${2:?missing value for --branch}; shift 2 ;;
+    --choose-base) choose_base=1; shift ;;
+    --editor-command) editor=${2:?missing value for --editor-command}; shift 2 ;;
+    --right-command) right=${2:?missing value for --right-command}; shift 2 ;;
+    --shell-command) shell=${2:?missing value for --shell-command}; shift 2 ;;
+    --no-switch) no_switch=1; shift ;;
+    -h|--help) usage; exit ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+if [[ -z $repo ]]; then
+  repo_output=$(pick_repo) || exit 0
+  repo_keypress=$(printf '%s\n' "$repo_output" | sed -n '1p')
+  repo=$(printf '%s\n' "$repo_output" | sed -n '2p')
+  [[ $repo_keypress == ctrl-b ]] && choose_base=1
+  [[ -n $repo ]] || exit 0
+else
+  repo=$(resolve_repo "$repo") || die "repository not found: $repo"
+fi
+
+if [[ -z $base ]]; then
+  if [[ $choose_base == 0 ]]; then
+    base=$("$plugin_dir/scripts/state.sh" get "$repo" || true)
+    if [[ -n $base ]] && ! git -C "$repo" rev-parse --verify --quiet "$base^{commit}" >/dev/null \
+      && ! git -C "$repo" rev-parse --verify --quiet "origin/$base^{commit}" >/dev/null; then
+      base=''
+    fi
+  fi
+  [[ -n $base ]] || base=$(pick_base "$repo") || exit 0
+fi
+
+if [[ -z $target ]]; then
+  target=$(pick_target "$repo") || exit 0
+  [[ -n $target ]] || exit 0
+fi
+
+create_worktree "$repo" "$base" "$target" "$editor" "$right" "$shell" "$no_switch"
