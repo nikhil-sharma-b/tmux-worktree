@@ -1,3 +1,7 @@
 #!/usr/bin/env bash
 
+if [[ -n ${FNM_CALL_LOG:-} ]]; then
+  printf '%s\n' "$*" >>"$FNM_CALL_LOG"
+fi
+
 exit 0

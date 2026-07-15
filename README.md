@@ -52,12 +52,15 @@ set -g @worktree-border-style 'fg=brightblack'
 set -g @worktree-title ''
 set -g @worktree-roots '~/repos,~/src'
 set -g @worktree-scan-depth '4'
+set -g @worktree-list-linked-worktrees 'off'
 set -g @worktree-dir '~/worktrees'
 set -g @worktree-env-patterns '.env,.env.*'
 set -g @worktree-editor-command 'nvim .'
 ```
 
 Repository discovery uses an XDG cache. Opening the picker reads only that cache; `Ctrl-r` performs the filesystem scan. The first opening builds the cache when none exists.
+
+Linked worktrees are excluded by default. This prevents every worktree belonging to a bare or regular repository from appearing as another repository. Set `@worktree-list-linked-worktrees` to `on` to include them, then press `Ctrl-r` in the picker.
 
 For indexed global discovery, provide a command that prints one repository path per line. It runs only while refreshing the cache:
 

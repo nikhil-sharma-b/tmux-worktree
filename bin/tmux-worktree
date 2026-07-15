@@ -67,9 +67,10 @@ pick_target() {
   require_command fzf
   output=$(branch_list "$repo" | fzf "${fzf_common[@]}" \
     --print-query \
-    --header='Type new branch · ↵ create or reopen · esc') || return 1
+    --header='Type new branch · ↵ create or reopen · esc') || true
   query=$(printf '%s\n' "$output" | sed -n '1p')
   selection=$(printf '%s\n' "$output" | sed -n '2p')
+  [[ -n $query || -n $selection ]] || return 1
   printf '%s\n' "${query:-$selection}"
 }
 

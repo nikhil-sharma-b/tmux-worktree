@@ -29,10 +29,12 @@ export TMUX_WORKTREE_ROOTS="$tmp_dir/repos"
 export TMUX_WORKTREE_DIR="$tmp_dir/worktrees"
 export TMUX_TEST_SOCKET=$socket
 export TMUX_CALL_LOG="$tmp_dir/tmux-calls"
+export FNM_CALL_LOG="$tmp_dir/fnm-calls"
 export REAL_TMUX=$real_tmux
 export PATH="$repo_dir/tests/bin:$PATH"
 mkdir -p "$HOME" "$TMUX_WORKTREE_ROOTS"
 : >"$TMUX_CALL_LOG"
+: >"$FNM_CALL_LOG"
 
 regular="$TMUX_WORKTREE_ROOTS/regular project"
 mkdir -p "$regular/apps/api"
@@ -53,9 +55,23 @@ mkdir -p "$bare/envs/apps/api"
 printf 'BARE=one\n' >"$bare/envs/.env"
 printf 'NESTED=two\n' >"$bare/envs/apps/api/.env"
 
+regular_linked="$TMUX_WORKTREE_ROOTS/regular-linked"
+bare_linked="$TMUX_WORKTREE_ROOTS/bare-linked"
+git -C "$regular" worktree add -q -b regular-linked "$regular_linked" main
+git -C "$bare" worktree add -q -b bare-linked "$bare_linked" main
+
 discovery=$("$repo_dir/scripts/discover.sh" refresh)
 [[ $discovery == *"$regular"* ]] || fail 'regular repository not discovered'
 [[ $discovery == *"$bare"* ]] || fail 'bare repository not discovered'
+[[ $discovery != *"$regular_linked"* ]] || fail 'regular linked worktree discovered by default'
+[[ $discovery != *"$bare_linked"* ]] || fail 'bare linked worktree discovered by default'
+
+export TMUX_WORKTREE_LIST_LINKED_WORKTREES=on
+discovery=$("$repo_dir/scripts/discover.sh" refresh)
+[[ $discovery == *"$regular_linked"* ]] || fail 'regular linked worktree missing when enabled'
+[[ $discovery == *"$bare_linked"* ]] || fail 'bare linked worktree missing when enabled'
+unset TMUX_WORKTREE_LIST_LINKED_WORKTREES
+"$repo_dir/scripts/discover.sh" refresh >/dev/null
 
 "$repo_dir/scripts/state.sh" set "$regular" main
 [[ $("$repo_dir/scripts/state.sh" get "$regular") == main ]] || fail 'default base not persisted'
@@ -79,7 +95,24 @@ windows=$(tmux list-windows -t '=regular-project-feature-test' -F '#{window_name
 [[ $windows == *edit* && $windows == *shell* ]] || fail 'expected edit and shell windows'
 panes=$(tmux list-panes -a -t '=regular-project-feature-test' -F '#{pane_id}' | wc -l)
 [[ $panes == 3 ]] || fail "expected 3 panes, got $panes"
-grep -q 'fnm\\ use.*:' "$TMUX_CALL_LOG" || fail 'fnm setup did not precede editor command'
+for _ in 1 2 3 4 5; do
+  [[ $(wc -l <"$FNM_CALL_LOG") == 3 ]] && break
+  sleep 0.1
+done
+[[ $(wc -l <"$FNM_CALL_LOG") == 3 ]] || fail 'fnm setup did not run in every pane'
+grep -q 'TMUX_WORKTREE_PANE_COMMAND=:' "$TMUX_CALL_LOG" || fail 'editor command not passed to pane runner'
+
+# fzf exits 1 when a new query matches no existing branch. The query must still
+# proceed to worktree creation instead of being mistaken for cancellation.
+mkdir -p "$tmp_dir/query-test-bin"
+printf '#!/usr/bin/env bash\nprintf "brand-new\\n"\nexit 1\n' >"$tmp_dir/query-test-bin/fzf"
+chmod +x "$tmp_dir/query-test-bin/fzf"
+PATH="$tmp_dir/query-test-bin:$PATH" "$repo_dir/bin/tmux-worktree" create \
+  --repo "$regular" \
+  --base main \
+  --editor-command ':' \
+  --no-switch
+[[ -d "$TMUX_WORKTREE_DIR/regular project/brand-new" ]] || fail 'unmatched fzf query did not create worktree'
 
 "$repo_dir/bin/tmux-worktree" create \
   --repo "$bare" \
