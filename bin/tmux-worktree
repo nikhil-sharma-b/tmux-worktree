@@ -99,7 +99,7 @@ switch_to_session() {
 }
 
 create_worktree() {
-  local repo=$1 base=$2 target=$3 editor=$4 right=$5 shell=$6 no_switch=$7
+  local repo=$1 base=$2 target=$3 editor=$4 right=$5 shell=$6 no_switch=$7 session_override=$8
   local worktree_root name safe_target worktree session existing base_ref
 
   git check-ref-format --branch "$target" >/dev/null 2>&1 || die "invalid branch name: $target"
@@ -108,7 +108,12 @@ create_worktree() {
   safe_target=$(safe_name "$target")
   [[ -n $safe_target ]] || die "branch produces empty session name: $target"
   worktree="$worktree_root/$name/$safe_target"
-  session="$(safe_name "$name")-$safe_target"
+  if [[ -n $session_override ]]; then
+    session=$(safe_name "$session_override")
+    [[ -n $session ]] || die "session name is empty after sanitizing: $session_override"
+  else
+    session="$(safe_name "$name")-$safe_target"
+  fi
 
   if tmux has-session -t "=$session" 2>/dev/null; then
     [[ $no_switch == 1 ]] || switch_to_session "$session"
@@ -159,6 +164,7 @@ Options:
   --editor-command COMMAND
   --right-command COMMAND
   --shell-command COMMAND
+  --session-name NAME
   --no-switch
 EOF
 }
@@ -184,6 +190,7 @@ editor=$(tmux_worktree_option '@worktree-editor-command' 'nvim .')
 right=''
 shell=''
 no_switch=0
+session_name=''
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -194,6 +201,7 @@ while [[ $# -gt 0 ]]; do
     --editor-command) editor=${2:?missing value for --editor-command}; shift 2 ;;
     --right-command) right=${2:?missing value for --right-command}; shift 2 ;;
     --shell-command) shell=${2:?missing value for --shell-command}; shift 2 ;;
+    --session-name) session_name=${2:?missing value for --session-name}; shift 2 ;;
     --no-switch) no_switch=1; shift ;;
     -h|--help) usage; exit ;;
     *) die "unknown option: $1" ;;
@@ -226,4 +234,4 @@ if [[ -z $target ]]; then
   [[ -n $target ]] || exit 0
 fi
 
-create_worktree "$repo" "$base" "$target" "$editor" "$right" "$shell" "$no_switch"
+create_worktree "$repo" "$base" "$target" "$editor" "$right" "$shell" "$no_switch" "$session_name"

@@ -101,10 +101,13 @@ Available options:
 --editor-command COMMAND
 --right-command COMMAND
 --shell-command COMMAND
+--session-name NAME
 --no-switch
 ```
 
 Omitted repo, base, or branch values are selected interactively. Pane commands are trusted shell input intended for local wrappers.
+
+Pass `--session-name NAME` to create another tmux session for an existing worktree instead of reusing the default repository-branch session. This supports one session per external task or AI thread.
 
 Refresh repository cache without opening tmux:
 

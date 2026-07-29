@@ -112,6 +112,18 @@ done
 [[ $(wc -l <"$FNM_CALL_LOG") == 3 ]] || fail 'fnm setup did not run in every pane'
 grep -q 'TMUX_WORKTREE_PANE_COMMAND=:' "$TMUX_CALL_LOG" || fail 'editor command not passed to pane runner'
 
+"$repo_dir/bin/tmux-worktree" create \
+  --repo "$regular" \
+  --base main \
+  --branch feature/test \
+  --session-name ai-review-api-12345678 \
+  --editor-command ':' \
+  --right-command ':' \
+  --no-switch
+tmux has-session -t '=ai-review-api-12345678' || fail 'custom worktree session not created'
+custom_path=$(tmux display-message -p -t '=ai-review-api-12345678:edit.1' '#{pane_current_path}')
+[[ $custom_path == "$regular_worktree" ]] || fail 'custom session did not reuse worktree'
+
 right_pane=$(tmux list-panes -t '=regular-project-feature-test:edit' -F '#{pane_id}' | sed -n '2p')
 tmux send-keys -t "$right_pane" "printf '%s' \"\$TEST_NODE_VERSION\" > '$tmp_dir/node-version'" C-m
 for _ in 1 2 3 4 5; do
