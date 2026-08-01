@@ -99,6 +99,7 @@ Available options:
 --branch NAME
 --choose-base
 --editor-command COMMAND
+--no-editor
 --right-command COMMAND
 --shell-command COMMAND
 --session-name NAME
@@ -106,6 +107,8 @@ Available options:
 ```
 
 Omitted repo, base, or branch values are selected interactively. Pane commands are trusted shell input intended for local wrappers.
+
+Pass `--no-editor` to skip the editor pane: the main window then holds only `--right-command`, for callers that want a single program in the session.
 
 Pass `--session-name NAME` to create another tmux session for an existing worktree instead of reusing the default repository-branch session. This supports one session per external task or AI thread.
 

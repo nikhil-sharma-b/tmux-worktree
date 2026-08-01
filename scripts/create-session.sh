@@ -11,6 +11,7 @@ worktree=${2:?worktree required}
 editor_command=${3:-nvim .}
 right_command=${4:-}
 shell_command=${5:-}
+no_editor=${6:-0}
 
 if tmux has-session -t "=$session" 2>/dev/null; then
   printf '%s\n' "$session"
@@ -18,13 +19,20 @@ if tmux has-session -t "=$session" 2>/dev/null; then
 fi
 
 pane_runner="$script_dir/run-pane.sh"
-left_pane=$(tmux new-session -d -P -F '#{pane_id}' -s "$session" -c "$worktree" -n edit \
-  -e "TMUX_WORKTREE_PANE_COMMAND=$editor_command" "$pane_runner")
-right_pane=$(tmux split-window -h -P -F '#{pane_id}' -t "$left_pane" -c "$worktree" \
-  -e "TMUX_WORKTREE_PANE_COMMAND=$right_command" "$pane_runner")
-shell_pane=$(tmux new-window -d -P -F '#{pane_id}' -t "=$session:" -c "$worktree" -n shell \
-  -e "TMUX_WORKTREE_PANE_COMMAND=$shell_command" "$pane_runner")
+# Without an editor the main window is a single pane running the right command,
+# so callers that only want one program get exactly that.
+if [[ $no_editor == 1 ]]; then
+  main_pane=$(tmux new-session -d -P -F '#{pane_id}' -s "$session" -c "$worktree" -n main \
+    -e "TMUX_WORKTREE_PANE_COMMAND=$right_command" "$pane_runner")
+else
+  main_pane=$(tmux new-session -d -P -F '#{pane_id}' -s "$session" -c "$worktree" -n edit \
+    -e "TMUX_WORKTREE_PANE_COMMAND=$editor_command" "$pane_runner")
+  tmux split-window -h -t "$main_pane" -c "$worktree" \
+    -e "TMUX_WORKTREE_PANE_COMMAND=$right_command" "$pane_runner"
+fi
+tmux new-window -d -t "=$session:" -c "$worktree" -n shell \
+  -e "TMUX_WORKTREE_PANE_COMMAND=$shell_command" "$pane_runner"
 
-tmux select-window -t "$left_pane"
-tmux select-pane -t "$left_pane"
+tmux select-window -t "$main_pane"
+tmux select-pane -t "$main_pane"
 printf '%s\n' "$session"
