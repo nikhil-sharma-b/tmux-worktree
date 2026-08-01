@@ -99,7 +99,7 @@ switch_to_session() {
 }
 
 create_worktree() {
-  local repo=$1 base=$2 target=$3 editor=$4 right=$5 shell=$6 no_switch=$7 session_override=$8
+  local repo=$1 base=$2 target=$3 editor=$4 right=$5 shell=$6 no_switch=$7 session_override=$8 no_editor=${9:-0}
   local worktree_root name safe_target worktree session existing base_ref
 
   git check-ref-format --branch "$target" >/dev/null 2>&1 || die "invalid branch name: $target"
@@ -145,7 +145,7 @@ create_worktree() {
   fi
 
   "$plugin_dir/scripts/link-envs.sh" "$repo" "$worktree"
-  "$plugin_dir/scripts/create-session.sh" "$session" "$worktree" "$editor" "$right" "$shell" >/dev/null
+  "$plugin_dir/scripts/create-session.sh" "$session" "$worktree" "$editor" "$right" "$shell" "$no_editor" >/dev/null
   [[ $no_switch == 1 ]] || switch_to_session "$session"
 }
 
@@ -162,6 +162,7 @@ Options:
   --branch NAME
   --choose-base
   --editor-command COMMAND
+  --no-editor
   --right-command COMMAND
   --shell-command COMMAND
   --session-name NAME
@@ -190,6 +191,7 @@ editor=$(tmux_worktree_option '@worktree-editor-command' 'nvim .')
 right=''
 shell=''
 no_switch=0
+no_editor=0
 session_name=''
 
 while [[ $# -gt 0 ]]; do
@@ -202,6 +204,7 @@ while [[ $# -gt 0 ]]; do
     --right-command) right=${2:?missing value for --right-command}; shift 2 ;;
     --shell-command) shell=${2:?missing value for --shell-command}; shift 2 ;;
     --session-name) session_name=${2:?missing value for --session-name}; shift 2 ;;
+    --no-editor) no_editor=1; shift ;;
     --no-switch) no_switch=1; shift ;;
     -h|--help) usage; exit ;;
     *) die "unknown option: $1" ;;
@@ -234,4 +237,4 @@ if [[ -z $target ]]; then
   [[ -n $target ]] || exit 0
 fi
 
-create_worktree "$repo" "$base" "$target" "$editor" "$right" "$shell" "$no_switch" "$session_name"
+create_worktree "$repo" "$base" "$target" "$editor" "$right" "$shell" "$no_switch" "$session_name" "$no_editor"
